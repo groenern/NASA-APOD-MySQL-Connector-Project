@@ -1,191 +1,187 @@
- #https://api.nasa.gov/
-#https://www.freecodecamp.org/news/connect-python-with-sql/
 import requests
-import urllib.request
 from PIL import Image
-from pprint import PrettyPrinter
 import mysql.connector
-
 from datetime import datetime
+from pprint import PrettyPrinter
+import urllib.request
 
 pp = PrettyPrinter()
 
+class NASAImage:
+    def __init__(self, image):
+        self.date = datetime.strptime(image.get('date', ''), '%Y-%m-%d').date()
+        self.hdurl = image.get('hdurl', '')
+        self.url = image.get('url', '')
+        self.title = image.get('title', '')
+        self.media_type = image.get('media_type', '')
+        self.copyright = image.get('copyright', '')
+        self.service_version = image.get('service_version', '')
+
 class JsonLoader:
     URL_APOD = "https://api.nasa.gov/planetary/apod"
-    apiKey = 'CD2SnMYuuP4QRtl0BchenBIF1lMFnHwbonpPclNf'
-    
+    api_key = 'CD2SnMYuuP4QRtl0BchenBIF1lMFnHwbonpPclNf'
+
     def __init__(self, count):
         self.count = count
         self.params = {
-            'api_key':self.apiKey,
+            'api_key':self.api_key,
             'count':self.count
         }
 
         self.images = requests.get(self.URL_APOD,params=self.params).json()
-        #pp.pprint(self.images)
 
-def createDatabase(connection, query):
-    cursor = connection.cursor()
-    try:
-        cursor.execute(query)
-        print("Database created successfully")
-    except mysql.connector.Error as error:
-        print(f"Error: '{error}'")
+    def upload_to_database(self, db):
+        for image in self.images:
+            nasa_image = NASAImage(image)
+            db.insert_image(nasa_image)
 
-def createServerConnection(hostName, userName, userPassword):
-    connection = None
-    try:
-        connection = mysql.connector.connect(
-            host = hostName,
-            user = userName,
-            passwd = userPassword
-        )
+class MySQLConnector:
+    def __init__(self, host, username, password, database="apod_database"):
+        self.host = host
+        self.username = username
+        self.password = password
+        self.database = database
+        self.connection = None
 
-        print("MySQL connection successful")
-    except mysql.connector.Error as error:
-        print(f"Error: '{error}'")
+    def connect(self):
+        try:
+            self.connection = mysql.connector.connect(
+                host=self.host,
+                user=self.username,
+                passwd=self.password,
+                database=self.database
+            )
+            print("MySQL connection successful")
+        except mysql.connector.Error as error:
+            print(f"Error: '{error}'")
+            raise Exception(f"Error connecting to MySQL: '{error}'")
 
-    return connection
+    def disconnect(self):
+        if self.connection:
+            self.connection.close()
 
-def createDatabaseConnection(hostName, userName, userPassword, databaseName):
-    connection = None
-    try:
-        connection = mysql.connector.connect(
-            host = hostName,
-            user = userName,
-            passwd = userPassword,
-            database = databaseName,
-            consume_results=True
-        )
+    def execute_query(self, query, values=None):
+        cursor = self.connection.cursor()
+        try:
+            cursor.execute(query, values)  # pass the values as a tuple here
+            self.connection.commit()
+        except Exception as error:
+            self.connection.rollback()
+            raise Exception(f"Error executing query: '{error}'")
+        finally:
+            cursor.close()
 
-        print("MySQL Database connection successful")
-    except mysql.connector.Error as error:
-        print(f"Error: '{error}'")
+    def read_query(self, query):
+        try:
+            cursor = self.connection.cursor()
+            cursor.execute(query)
+            result = cursor.fetchall()
+            #print(result)
+            return result
+        except mysql.connector.Error as error:
+            print(f"Error: '{error}'")
+            raise Exception(f"Error reading query: '{error}'")
+        finally:
+            cursor.close()
 
-    return connection
+class APODDatabase:
+    def __init__(self, connector):
+        self.connector = connector
+        self.create_database()
+        self.create_tables()
 
-def executeQuery(connection, query):
-    cursor = connection.cursor()
-    try:
-        cursor.execute(query)
-        connection.commit()
-        print(query + "\nQuery successful")
-    except mysql.connector.Error as error:
-        print(f"Error: '{error}'")
+    def create_database(self):
+        query = f"CREATE DATABASE IF NOT EXISTS {self.connector.database};"
+        self.connector.execute_query(query)
 
-def readQuery(connection, query):
-    cursor = connection.cursor()
-    result = None
-    try:
-        cursor.execute(query)
-        result = cursor.fetchall()
-        print(query + "\nQuery successful")
-        return result
-    except mysql.connector.Error as error:
-        print(f"Error: '{error}'")
+    def create_tables(self):
+        queries = [
+            f"USE {self.connector.database};",
+            """
+            CREATE TABLE IF NOT EXISTS URL (
+                date DATE PRIMARY KEY,
+                hdurl VARCHAR(128) NOT NULL,
+                url VARCHAR(128) NOT NULL
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS TITLE (
+                date DATE PRIMARY KEY,
+                title VARCHAR(128) NOT NULL
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS MEDIAINFO (
+                date DATE PRIMARY KEY,
+                media_type VARCHAR(32) NOT NULL,
+                copyright VARCHAR(128) NOT NULL,
+                service_version VARCHAR(16) NOT NULL
+            );
+            """
+        ]
+        for query in queries:
+            self.connector.execute_query(query)
+            
+        print("Tables created.")
 
-myImageLoader = JsonLoader(10) # Load 40 images
+    def insert_image(self, image):
+        queries = [
+            "INSERT INTO URL VALUES (%s, %s, %s);",
+            "INSERT INTO TITLE VALUES (%s, %s);",
+            "INSERT INTO MEDIAINFO VALUES (%s, %s, %s, %s);"
+        ]
+        values = [
+            (image.date, image.hdurl, image.url),
+            (image.date, image.title),
+            (image.date, image.media_type, image.copyright, image.service_version)
+        ]
+        for i in range(len(queries)):
+            query = queries[i]
+            value = values[i]
+            self.connector.execute_query(query, value)
 
-# CONNECT TO MYSQL
-password = "BearcatGraduate841!"
-connection = createServerConnection("localhost", "root", password)
+def main():
+    user = "root"
+    password = "BearcatGraduate841!"
+    DBName = "APOD_Database"
 
-# CREATE DATABASE IN MYSQL
-createQuery = "CREATE DATABASE APOD_Database"
-createDatabase(connection, createQuery)
+    # Connect to MySQL database
+    connector = MySQLConnector("localhost", user, password)
+    connector.connect()
 
-# CONNECT TO APOD_DATABASE IN MYSQL
-databaseName = "APOD_Database"
-databaseConnection = createDatabaseConnection("localhost", "root", password, databaseName)
+    # Load images from NASA's APOD API
+    loader = JsonLoader(10)
 
-# CREATE URL TABLE (HDURL + URL)
-createURLTable = """
-CREATE TABLE URL (
-    date DATE PRIMARY KEY,
-    hdurl VARCHAR(128) NOT NULL,
-    url VARCHAR(128) NOT NULL);
-"""
+    # Connect to APOD_Database database
+    db = APODDatabase(connector)
 
-# CREATE DESCRIPTION TABLE (TITLE + EXPLANATION)
-createTitleTable = """
-CREATE TABLE TITLE (
-    date DATE PRIMARY KEY,
-    title VARCHAR(128) NOT NULL);
-"""
+    # Upload images to APOD_Database database
+    loader.upload_to_database(db)
+     
+    availableDateQuery = "SELECT * FROM title"
+    availableDates = dict(connector.read_query(availableDateQuery))
 
-# CREATE MEDIA INFO TABLE (MEDIA_TYPE + COPYRIGHT + SERVICE_VERSION)
-createMediaInfoTable = """
-CREATE TABLE MEDIAINFO (
-    date DATE PRIMARY KEY,
-    media_type VARCHAR(32) NOT NULL,
-    copyright VARCHAR(128) NOT NULL,
-    service_version VARCHAR(16) NOT NULL);
-"""
+    print("\nAvailable Dates: ")
+    for date in availableDates:
+        print(date)
 
-# EXECUTE SQL STATEMENTS FROM ABOVE
-executeQuery(databaseConnection, createURLTable)
-executeQuery(databaseConnection, createTitleTable)
-executeQuery(databaseConnection, createMediaInfoTable)
+    selected = input("\nSelected Date: ")
 
-# POPULATE TABLE VALUE VARIABLES
-populateURL = """
-INSERT INTO url VALUES
-"""
+    dateObject = datetime.strptime(selected, '%Y-%m-%d').date() # .date truncates unnecessary hours and minutes 
+    print(dateObject)
 
-populateTitle = """
-INSERT INTO title VALUES
-"""
+    avilableURLQuery = "SELECT date, url FROM url"
+    availableURLs = dict(connector.read_query(avilableURLQuery))
 
-populateMediaInfo = """
-INSERT INTO mediainfo VALUES
-"""
+    print("Title: {title} \nURL: {url}".format(title = availableDates[dateObject], url = availableURLs[dateObject]))
 
-for thisImage in myImageLoader.images:
-    populateURL += "('{date}', '{hdurl}', '{url}'),".format(date = thisImage.get('date'), hdurl = thisImage.get('hdurl'), url = thisImage.get('url'))
-    populateTitle += "('{date}', '{title}'),".format(date = thisImage.get('date'), title = thisImage.get('title').replace("'", ""))
-    populateMediaInfo += "('{date}', '{mediaType}', '{copyright}', '{serviceVersion}'),".format(date = thisImage.get('date'), mediaType = thisImage.get('media_type'), copyright = thisImage.get('copyright'), serviceVersion = thisImage.get("service_version"))
+    urllib.request.urlretrieve(availableURLs[dateObject], "test.png")
 
-# TRUNCATES LAST UNNECESSARY LETTER FROM STATEMENT ','
-populateURL = populateURL[:-1] 
-populateTitle = populateTitle[:-1]
-populateMediaInfo = populateMediaInfo[:-1]
+    img = Image.open("test.png")
+    img.show()
 
-# ADD ; TO END SQL STATEMENT
-populateURL += ';' 
-populateTitle += ';'
-populateMediaInfo += ";"
+    # Disconnect from MySQL database
+    connector.disconnect()
 
-# EXECUTE QUERY TO POPULATE ALL TABLES
-executeQuery(databaseConnection, populateURL)
-executeQuery(databaseConnection, populateTitle)
-executeQuery(databaseConnection, populateMediaInfo)
-
-print("\nDatabase populated\n")
-
-availableDateQuery = "SELECT * FROM title"
-availableDates = dict(readQuery(databaseConnection, availableDateQuery))
-
-print("\nAvailable Dates: ")
-for date in availableDates:
-    print(date)
-    
-selected = input("\nSelected Date: ")
-
-dateObject = datetime.strptime(selected, '%Y-%m-%d').date() # .date truncates unnecessary hours and minutes 
-
-avilableURLQuery = "SELECT date, url FROM url"
-availableURLs = dict(readQuery(databaseConnection, avilableURLQuery))
-
-mediaInfoQuery = "SELECT * FROM mediainfo"
-mediaInfo = readQuery(databaseConnection, mediaInfoQuery)
-
-print("Title: {title} \nURL: {url}".format(title = availableDates[dateObject], url = availableURLs[dateObject]))
-
-for mInfo in mediaInfo:
-    if mInfo[0] == dateObject:
-        print("Media type: {media} \nCopyright: {copyright} \nVersion: {version}".format(media = mInfo[1], copyright = mInfo[2], version = mInfo[3]))
-
-urllib.request.urlretrieve(availableURLs[dateObject], "test.png")
-
-img = Image.open("test.png")
-img.show()
+if __name__ == "__main__":
+    main()
