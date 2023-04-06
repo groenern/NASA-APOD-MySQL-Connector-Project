@@ -4,6 +4,8 @@ import mysql.connector
 from datetime import datetime
 from pprint import PrettyPrinter
 import urllib.request
+import configparser
+import os
 
 pp = PrettyPrinter()
 
@@ -18,10 +20,9 @@ class NASAImage:
         self.service_version = image.get('service_version', '')
 
 class JsonLoader:
-    URL_APOD = "https://api.nasa.gov/planetary/apod"
-    api_key = 'CD2SnMYuuP4QRtl0BchenBIF1lMFnHwbonpPclNf'
-
-    def __init__(self, count):
+    def __init__(self, url, apiKey, count):
+        self.URL_APOD = url
+        self.api_key = apiKey
         self.count = count
         self.params = {
             'api_key':self.api_key,
@@ -36,7 +37,7 @@ class JsonLoader:
             db.insert_image(nasa_image)
 
 class MySQLConnector:
-    def __init__(self, host, username, password, database="apod_database"):
+    def __init__(self, host, username, password, database):
         self.host = host
         self.username = username
         self.password = password
@@ -141,16 +142,27 @@ class APODDatabase:
             self.connector.execute_query(query, value)
 
 def main():
-    user = "root"
-    password = "BearcatGraduate841!"
-    DBName = "APOD_Database"
+    dir = os.path.dirname(__file__)
+    configFile = os.path.join(dir, 'config.ini')
+
+    config = configparser.ConfigParser()
+    config.read(configFile)
+
+    mySQLHost = config['mysql']['host']
+    mySQLUser = config['mysql']['username']
+    mySQLPass = config['mysql']['password']
+    mySQLDB = config['mysql']['database']
+
+    nasaURL = config['nasa']['url']
+    nasaAPIKey = config['nasa']['api_key']
+    nasaCount = config['nasa']['count']
 
     # Connect to MySQL database
-    connector = MySQLConnector("localhost", user, password)
+    connector = MySQLConnector(mySQLHost, mySQLUser, mySQLPass, mySQLDB)
     connector.connect()
 
     # Load images from NASA's APOD API
-    loader = JsonLoader(10)
+    loader = JsonLoader(nasaURL, nasaAPIKey, nasaCount)
 
     # Connect to APOD_Database database
     db = APODDatabase(connector)
