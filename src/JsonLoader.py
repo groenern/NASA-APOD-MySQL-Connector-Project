@@ -1,4 +1,4 @@
-from src import NASAImage
+import NASAImage
 import requests
 
 class JsonLoader:
