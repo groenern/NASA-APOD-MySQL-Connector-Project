@@ -22,5 +22,9 @@ This project is a connector that fetches the NASA Astronomy Picture of the Day (
  ### Usage
  To run the connector, execute `python main.py` in the project root directory. The connetor will fetch a specified number of APODs (count in config.ini), and populate a MySQL Database with information about each APOD. The user then has the choice to select an image and display it.
 
+## Sample Output
+![OutputImage](https://user-images.githubusercontent.com/130081417/230979591-b2f44874-debb-49b6-b59f-3f75f29ae47e.png)
+![OutputConsole](https://user-images.githubusercontent.com/130081417/230979631-6d50a76b-1521-484d-ae68-27b2b8bb18aa.png)
+
 ## License
 This project is licensed under the MIT License - see the LICENSE file for details.
